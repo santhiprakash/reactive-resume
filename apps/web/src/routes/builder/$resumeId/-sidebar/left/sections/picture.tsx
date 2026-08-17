@@ -43,6 +43,7 @@ import { getReadableErrorMessage } from "@/libs/error-message";
 import { orpc } from "@/libs/orpc/client";
 import { useAppForm } from "@/libs/tanstack-form";
 import { SectionBase } from "../shared/section-base";
+import { formatFileSize, isPictureUploadTooLarge } from "./picture-upload";
 
 export function PictureSectionBuilder() {
 	return (
@@ -399,6 +400,11 @@ async function getCroppedImageBlob(imageSrc: string, pixelCrop: Area): Promise<B
 
 	canvas.width = Math.round(pixelCrop.width);
 	canvas.height = Math.round(pixelCrop.height);
+
+	// Flatten onto white before exporting as JPEG (which has no alpha channel),
+	// so transparent regions do not render as black.
+	context.fillStyle = "#ffffff";
+	context.fillRect(0, 0, canvas.width, canvas.height);
 	context.drawImage(
 		image,
 		pixelCrop.x,
@@ -412,10 +418,17 @@ async function getCroppedImageBlob(imageSrc: string, pixelCrop: Area): Promise<B
 	);
 
 	return new Promise<Blob>((resolve, reject) => {
-		canvas.toBlob((blob) => {
-			if (blob) resolve(blob);
-			else reject(new Error("Canvas is empty"));
-		}, "image/png");
+		// Export as JPEG to match the server pipeline: every image upload is
+		// resized and converted to JPEG (quality 80) by sharp anyway. Re-encoding
+		// the crop as PNG inflated large photos past the 10MB upload cap (#3305).
+		canvas.toBlob(
+			(blob) => {
+				if (blob) resolve(blob);
+				else reject(new Error("Canvas is empty"));
+			},
+			"image/jpeg",
+			0.92,
+		);
 	});
 }
 
@@ -543,6 +556,16 @@ function PictureSectionForm() {
 		} catch {
 			// ponytail: canvas crop can fail (tainted image, no context) — fall back to the original file.
 			fileToUpload = cropState.file;
+		}
+
+		// Guard the final artifact, not the picked file: the crop step re-encodes
+		// to JPEG, so an oversized original can still produce an uploadable crop.
+		// The server rejects >10MB inputs with a bare "Input validation failed".
+		if (isPictureUploadTooLarge(fileToUpload.size)) {
+			toast.error(
+				t`Picture is too large (${formatFileSize(fileToUpload.size)}). Crop tighter or choose a smaller image — the maximum upload size is 10MB.`,
+			);
+			return;
 		}
 
 		uploadPictureFile(fileToUpload);
