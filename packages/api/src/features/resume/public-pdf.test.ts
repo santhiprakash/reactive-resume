@@ -24,6 +24,7 @@ const dependencies = (resume = buildResume()) => ({
 	resolveCurrentUserId: vi.fn().mockResolvedValue(undefined),
 	rateLimiter: { consume: vi.fn() },
 	renderPdf: vi.fn().mockResolvedValue(new File(["%PDF"], "resume.pdf", { type: "application/pdf" })),
+	incrementStatistics: vi.fn().mockResolvedValue(undefined),
 });
 
 describe("createPublicResumePdf", () => {
@@ -89,5 +90,32 @@ describe("createPublicResumePdf", () => {
 		pdfDependencies.renderPdf.mockRejectedValue(rendererError);
 
 		await expect(createPublicResumePdf(input, pdfDependencies)).rejects.toBe(rendererError);
+	});
+
+	it("increments download statistics for non-owner viewers", async () => {
+		const pdfDependencies = dependencies();
+		// resolveCurrentUserId returns undefined (anonymous visitor)
+		await createPublicResumePdf(input, pdfDependencies);
+
+		expect(pdfDependencies.incrementStatistics).toHaveBeenCalledWith({
+			id: "resume-1",
+			downloads: true,
+		});
+	});
+
+	it("does not increment download statistics for the owner", async () => {
+		const ownerDependencies = dependencies();
+		ownerDependencies.resolveCurrentUserId.mockResolvedValue("owner-1");
+		await createPublicResumePdf(input, ownerDependencies);
+
+		expect(ownerDependencies.incrementStatistics).not.toHaveBeenCalled();
+	});
+
+	it("does not increment download statistics when render fails", async () => {
+		const failDependencies = dependencies();
+		failDependencies.renderPdf.mockRejectedValue(new Error("renderer failed"));
+		await expect(createPublicResumePdf(input, failDependencies)).rejects.toThrow("renderer failed");
+
+		expect(failDependencies.incrementStatistics).not.toHaveBeenCalled();
 	});
 });

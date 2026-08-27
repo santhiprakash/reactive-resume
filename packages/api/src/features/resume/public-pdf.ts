@@ -1,7 +1,7 @@
 import type { ResumeData } from "@reactive-resume/schema/resume/data";
 import { ORPCError } from "@orpc/server";
 import { generateFilename } from "@reactive-resume/utils/file";
-import { assertCanView } from "./access-policy";
+import { assertCanView, isOwner } from "./access-policy";
 import { publicRenderRateLimiter } from "./public-render-rate-limit";
 import { parseStoredResumeData } from "./resume-data-validation";
 
@@ -26,6 +26,7 @@ export type PublicResumePdfDependencies = {
 	resolveCurrentUserId(requestHeaders: Headers): Promise<string | undefined>;
 	rateLimiter: { consume(input: { trustedClient: string; resumeId: string }): void };
 	renderPdf(input: { data: ResumeData; filename: string }): Promise<File>;
+	incrementStatistics?: (input: { id: string; downloads: boolean }) => Promise<void>;
 };
 
 const findResume = async ({ username, slug }: Pick<CreatePublicResumePdfInput, "username" | "slug">) => {
@@ -56,6 +57,10 @@ const defaultDependencies: PublicResumePdfDependencies = {
 		(await import("../../context")).resolveUserFromRequestHeaders(requestHeaders).then((user) => user?.id),
 	rateLimiter: publicRenderRateLimiter,
 	renderPdf: async (input) => (await import("@reactive-resume/pdf/server")).createResumePdfFile(input),
+	incrementStatistics: (input) =>
+		import("./service").then(({ resumeService }) =>
+			resumeService.statistics.increment(input),
+		),
 };
 
 export async function createPublicResumePdf(
@@ -77,8 +82,16 @@ export async function createPublicResumePdf(
 		});
 	}
 
+	const viewer = currentUserId ? { id: currentUserId } : null;
+
 	const data = parseStoredResumeData(resume.data);
 	dependencies.rateLimiter.consume({ trustedClient: input.trustedClient, resumeId: resume.id });
 	const filename = generateFilename(data.basics.name || "Resume", "pdf");
-	return { body: await dependencies.renderPdf({ data, filename }), filename };
+	const body = await dependencies.renderPdf({ data, filename });
+
+	if (dependencies.incrementStatistics && !isOwner(resume, viewer)) {
+		await dependencies.incrementStatistics({ id: resume.id, downloads: true });
+	}
+
+	return { body, filename };
 }
