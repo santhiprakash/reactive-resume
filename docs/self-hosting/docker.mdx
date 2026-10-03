@@ -390,7 +390,7 @@ openssl rand -hex 32
 <Accordion title="AI features (optional)">
   Saved AI provider management is usable only when **`ENCRYPTION_SECRET`** is configured. The AI Agent workspace also requires **`REDIS_URL`**. The rest of Reactive Resume can run without them.
 
-  - **`REDIS_URL`**: Redis connection string used by the AI Agent workspace.
+  - **`REDIS_URL`**: Redis connection string used by the AI Agent workspace. For password-only authentication (`redis-server --requirepass`), leave the username empty — `redis://:<password>@<host>` — or use the built-in ACL user, `redis://default:<password>@<host>`. A named username only works when the server has a matching ACL user; otherwise Redis replies `WRONGPASS invalid username-password pair`.
   - **`ENCRYPTION_SECRET`**: Secret used to encrypt saved AI provider credentials. Generate with `openssl rand -hex 32`.
   - Live web research depends on the selected AI provider/model supporting native web search. The app does not run its own URL crawler.
 
