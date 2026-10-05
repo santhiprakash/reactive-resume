@@ -130,7 +130,6 @@ export const aiProvidersService = {
 			const { apiKey: _apiKey, ...response } = global;
 			return [response];
 		}
-		assertCredentialEncryptionConfigured();
 
 		const providers = await db
 			.select()

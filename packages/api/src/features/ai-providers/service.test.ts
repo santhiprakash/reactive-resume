@@ -17,6 +17,9 @@ const { dbMock, queryMock, queryState } = vi.hoisted(() => {
 			return query;
 		}),
 		limit: vi.fn(async () => state.rows),
+		// Chains that end at `orderBy` (like `list`) await the query object itself.
+		// oxlint-disable-next-line no-thenable
+		then: (onFulfilled: (rows: unknown[]) => unknown) => onFulfilled(state.rows),
 	};
 
 	return {
@@ -66,6 +69,7 @@ vi.mock("../ai/service", () => ({ testConnection: vi.fn() }));
 vi.mock("../ai/url-policy", () => ({ resolveAiBaseUrl: vi.fn() }));
 
 const { aiProvidersService } = await import("./service");
+const { assertCredentialEncryptionConfigured } = await import("../ai/credentials");
 
 function providerRow(overrides: Record<string, unknown> = {}) {
 	return {
@@ -96,6 +100,25 @@ describe("aiProvidersService", () => {
 		queryState.rows = [];
 		queryState.whereArg = undefined;
 		queryState.orderByArgs = [];
+	});
+
+	it("lists providers without requiring ENCRYPTION_SECRET to be configured", async () => {
+		// list() only reads metadata — a missing secret must not block it, or a self-hosted user
+		// can never reach the form that adds their first provider.
+		const assertMock = vi.mocked(assertCredentialEncryptionConfigured);
+		assertMock.mockImplementation(() => {
+			throw new Error("AI_CREDENTIAL_ENCRYPTION_UNAVAILABLE");
+		});
+		try {
+			await expect(aiProvidersService.list({ userId: "user-1" })).resolves.toEqual([]);
+
+			queryState.rows = [providerRow()];
+			await expect(aiProvidersService.list({ userId: "user-1" })).resolves.toMatchObject([
+				{ id: "provider-1", apiKeyPreview: "preview" },
+			]);
+		} finally {
+			assertMock.mockImplementation(() => {});
+		}
 	});
 
 	it("prefers the most recently used enabled and tested provider, then creation order", async () => {
